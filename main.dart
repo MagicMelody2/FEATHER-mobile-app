@@ -5,6 +5,8 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'dart:ui';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+final supabase = Supabase.instance.client;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -14,8 +16,6 @@ Future<void> main() async {
   );
 
   print("Supabase initialized!");
-
-  final supabase = Supabase.instance.client;
 
   try {
     final response = await supabase.from('test').select();
@@ -131,7 +131,31 @@ class BackgroundImage extends StatelessWidget {
   }
 }
 
-class LoginForm extends StatelessWidget {
+class LoginForm extends StatefulWidget {
+  @override
+  State<LoginForm> createState() => _LoginFormState();
+}
+
+class _LoginFormState extends State<LoginForm> {
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+
+  Future<void> login() async {
+    try {
+      await supabase.auth.signInWithPassword(
+        email: emailController.text.trim(),
+        password: passwordController.text.trim(),
+      );
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => MainLayout()),
+      );
+    } catch (e) {
+      print("FULL ERROR: ${e.toString()}");
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Align(
@@ -148,22 +172,15 @@ class LoginForm extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  UsernameField(),
-                  SizedBox(height: 20),
-                  PasswordField(),
+                  UsernameField(controller: emailController),
+
                   SizedBox(height: 20),
 
-                  // 👇 THIS is where navigation goes
-                  ElevatedButton(
-                    onPressed: () {
-                      // After login succeeds
-                      Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(builder: (context) => MainLayout()),
-                      );
-                    },
-                    child: Text("Login"),
-                  ),
+                  PasswordField(controller: passwordController),
+
+                  SizedBox(height: 20),
+
+                  ElevatedButton(onPressed: login, child: Text("Login")),
                 ],
               ),
             ),
@@ -175,14 +192,19 @@ class LoginForm extends StatelessWidget {
 }
 
 class UsernameField extends StatelessWidget {
+  final TextEditingController controller;
+
+  const UsernameField({super.key, required this.controller});
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextField(
+          controller: controller,
           decoration: InputDecoration(
-            hintText: "Username",
+            hintText: "Email",
             filled: true,
             fillColor: Colors.grey[300],
             border: OutlineInputBorder(
@@ -201,7 +223,6 @@ class UsernameField extends StatelessWidget {
               context,
               MaterialPageRoute(builder: (context) => NewPasswordPage()),
             );
-            print("Go to Sign Up page");
           },
           child: Text(
             "New User?",
@@ -217,12 +238,17 @@ class UsernameField extends StatelessWidget {
 }
 
 class PasswordField extends StatelessWidget {
+  final TextEditingController controller;
+
+  const PasswordField({super.key, required this.controller});
+
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextField(
+          controller: controller,
           obscureText: true,
           decoration: InputDecoration(
             hintText: "Password",
@@ -235,7 +261,9 @@ class PasswordField extends StatelessWidget {
             suffixIcon: Icon(Icons.close),
           ),
         ),
+
         SizedBox(height: 5),
+
         InkWell(
           onTap: () {
             Navigator.push(
@@ -425,19 +453,67 @@ class VerifyNewPasswordField extends StatelessWidget {
 }
 
 // ---------------- DASHBOARD PAGE ----------------
+class DashboardPage extends StatefulWidget {
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
 
-class DashboardPage extends StatelessWidget {
+class _DashboardPageState extends State<DashboardPage> {
+  String? username;
+
+  @override
+  void initState() {
+    super.initState();
+    loadUser(); // 👈 ONLY load data
+  }
+
+  Future<void> loadUser() async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) {
+      print("NO USER LOGGED IN");
+      return;
+    }
+
+    final data = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .maybeSingle();
+
+    setState(() {
+      final value = data?['username'];
+
+      username = (value == null || value.toString().trim().isEmpty)
+          ? 'User'
+          : value.toString();
+    });
+  }
+
+  Future<void> updateUsername() async {
+    final user = supabase.auth.currentUser;
+
+    if (user == null) return;
+
+    await supabase
+        .from('profiles')
+        .update({'username': 'Gracie'})
+        .eq('id', user.id);
+
+    await loadUser(); // refresh UI
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Stack(
         children: [
-          // 🔭 Page Title
+          // 👋 Welcome Text (FIXED LOCATION)
           Positioned(
             top: 20,
             left: 20,
             child: Text(
-              "Dashboard",
+              "Welcome ${username ?? "..."}",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
           ),
@@ -460,19 +536,17 @@ class DashboardPage extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Align(
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.battery_full,
-                    size: 100,
-                    color: Colors.black87,
-                  ),
+              child: Center(
+                child: Icon(
+                  Icons.battery_full,
+                  size: 100,
+                  color: Colors.black87,
                 ),
               ),
             ),
           ),
+
+          // ➕ Top right box
           Positioned(
             top: 70,
             right: 20,
@@ -490,19 +564,17 @@ class DashboardPage extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Align(
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.add_circle_outline_rounded,
-                    size: 100,
-                    color: Colors.black87,
-                  ),
+              child: Center(
+                child: Icon(
+                  Icons.add_circle_outline_rounded,
+                  size: 100,
+                  color: Colors.black87,
                 ),
               ),
             ),
           ),
+
+          // ➕ Bottom left
           Positioned(
             top: 250,
             left: 20,
@@ -520,19 +592,17 @@ class DashboardPage extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Align(
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.add_circle_outline_rounded,
-                    size: 100,
-                    color: Colors.black87,
-                  ),
+              child: Center(
+                child: Icon(
+                  Icons.add_circle_outline_rounded,
+                  size: 100,
+                  color: Colors.black87,
                 ),
               ),
             ),
           ),
+
+          // ➕ Bottom right
           Positioned(
             top: 250,
             right: 20,
@@ -550,19 +620,17 @@ class DashboardPage extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Align(
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.add_circle_outline_rounded,
-                    size: 100,
-                    color: Colors.black87,
-                  ),
+              child: Center(
+                child: Icon(
+                  Icons.add_circle_outline_rounded,
+                  size: 100,
+                  color: Colors.black87,
                 ),
               ),
             ),
           ),
+
+          // ⭐ Favorites section
           Positioned(
             top: 370,
             left: 20,
@@ -600,7 +668,6 @@ class DashboardPage extends StatelessWidget {
     );
   }
 }
-
 // -------------------------- Device Specs Page -------------------------- \\
 
 class DeviceSpecsPage extends StatelessWidget {
