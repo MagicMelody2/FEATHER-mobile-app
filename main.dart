@@ -1,11 +1,10 @@
 // flutter run -d chrome
-
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'dart:ui';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-final supabase = Supabase.instance.client;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,7 +17,9 @@ Future<void> main() async {
   print("Supabase initialized!");
 
   try {
-    final response = await supabase.from('test').select();
+    final response = await Supabase.instance.client
+        .from('bird_sightings')
+        .select();
 
     print("Backend connected!");
     print(response);
@@ -34,9 +35,68 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(debugShowCheckedModeBanner: false, home: LoginPage());
+    return MaterialApp(debugShowCheckedModeBanner: false, home: HomePage());
   }
 }
+
+// -------------------------- Home Page -------------------------- \\
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  Future<void> callAPI() async {
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'bird-api',
+        headers: {'Content-Type': 'application/json'},
+        body: {},
+      );
+
+      print(response.data);
+      print(response.status);
+    } catch (e) {
+      print("ERROR: $e");
+    }
+  }
+
+  Future<void> testDB() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('bird_sightings')
+          .select();
+
+      print("TABLE: bird_sightings");
+      print(response);
+    } catch (e) {
+      print("Connection failed: $e");
+    }
+  }
+
+  Future<void> getBirds() async {
+    final response = await http.get(Uri.parse("http://127.0.0.1:8000/birds"));
+
+    final data = jsonDecode(response.body);
+
+    print(data);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Feather")),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(onPressed: callAPI, child: const Text("Call API")),
+            ElevatedButton(onPressed: testDB, child: const Text("Test DB")),
+            ElevatedButton(onPressed: getBirds, child: const Text("getBirds")),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // -------------------------- Nav Bar -------------------------- \\
 
 class MainLayout extends StatefulWidget {
@@ -142,7 +202,7 @@ class _LoginFormState extends State<LoginForm> {
 
   Future<void> login() async {
     try {
-      await supabase.auth.signInWithPassword(
+      await Supabase.instance.client.auth.signInWithPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
@@ -468,14 +528,14 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> loadUser() async {
-    final user = supabase.auth.currentUser;
+    final user = Supabase.instance.client.auth.currentUser;
 
     if (user == null) {
       print("NO USER LOGGED IN");
       return;
     }
 
-    final data = await supabase
+    final data = await Supabase.instance.client
         .from('profiles')
         .select('username')
         .eq('id', user.id)
@@ -491,11 +551,11 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> updateUsername() async {
-    final user = supabase.auth.currentUser;
+    final user = Supabase.instance.client.auth.currentUser;
 
     if (user == null) return;
 
-    await supabase
+    await Supabase.instance.client
         .from('profiles')
         .update({'username': 'Gracie'})
         .eq('id', user.id);
