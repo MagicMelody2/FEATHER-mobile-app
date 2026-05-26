@@ -182,10 +182,10 @@ class BackgroundImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Align(
-      alignment: Alignment(0, -0.5),
-      child: Image.asset(
-        "assets/images/logo.png",
-        width: 400, // adjust size
+      alignment: const Alignment(0, -0.3),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 350),
+        child: Image.asset("assets/images/logo.png", width: 400),
       ),
     );
   }
@@ -346,43 +346,153 @@ class PasswordField extends StatelessWidget {
 
 // -------------------------- Sign Up Page -------------------------- \\
 
-class SignUpPage extends StatelessWidget {
+class SignUpPage extends StatefulWidget {
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(body: Stack(children: [BackgroundImage(), SignUpForm()]));
-  }
+  State<SignUpPage> createState() => _SignUpPageState();
 }
 
-class SignUpForm extends StatelessWidget {
+class _SignUpPageState extends State<SignUpPage> {
+  final TextEditingController emailController = TextEditingController();
+
+  bool isLoading = false;
+  int cooldown = 0;
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    super.dispose();
+  }
+
+  void startCooldown() {
+    setState(() {
+      cooldown = 60;
+    });
+
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 1));
+
+      if (!mounted) return false;
+
+      if (cooldown == 0) return false;
+
+      setState(() {
+        cooldown--;
+      });
+
+      return cooldown > 0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment(0, 0.6),
-      child: Padding(
-        padding: EdgeInsets.only(bottom: 100, left: 20, right: 20),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              padding: EdgeInsets.all(20),
-              color: Colors.white.withValues(alpha: 0.5),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [EmailField(), SizedBox(height: 20), CodeField()],
+    return Scaffold(
+      body: Stack(
+        children: [
+          BackgroundImage(),
+
+          Align(
+            alignment: const Alignment(0, 0.6),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 100, left: 20, right: 20),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    color: Colors.white.withValues(alpha: 0.5),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        EmailField(controller: emailController),
+
+                        const SizedBox(height: 20),
+
+                        ElevatedButton(
+                          onPressed: (isLoading || cooldown > 0)
+                              ? null
+                              : () async {
+                                  final email = emailController.text.trim();
+
+                                  if (email.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text("Enter your email"),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setState(() {
+                                    isLoading = true;
+                                  });
+
+                                  try {
+                                    await Supabase.instance.client.auth
+                                        .resetPasswordForEmail(
+                                          email,
+                                          redirectTo:
+                                              "feather://reset-password",
+                                        );
+
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text("Reset email sent"),
+                                      ),
+                                    );
+
+                                    startCooldown();
+                                  } on AuthException catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(e.message)),
+                                    );
+                                  } finally {
+                                    setState(() {
+                                      isLoading = false;
+                                    });
+                                  }
+                                },
+                          child: Text(
+                            cooldown > 0
+                                ? "Wait ${cooldown}s"
+                                : (isLoading
+                                      ? "Sending..."
+                                      : "Send Reset Link"),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => LoginPage(),
+                              ),
+                            );
+                          },
+                          child: const Text("Back to Login"),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
 class EmailField extends StatelessWidget {
+  final TextEditingController controller;
+  const EmailField({super.key, required this.controller});
+
   @override
   Widget build(BuildContext context) {
     return TextField(
+      controller: controller,
       decoration: InputDecoration(
         hintText: "Email",
         filled: true,
@@ -397,25 +507,7 @@ class EmailField extends StatelessWidget {
   }
 }
 
-class CodeField extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      decoration: InputDecoration(
-        hintText: "Code",
-        filled: true,
-        fillColor: Colors.grey[300],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        suffixIcon: Icon(Icons.lock),
-      ),
-    );
-  }
-}
-
-// -------------------------- New Password Page -------------------------- \\
+// -------------------------- New User -------------------------- \\
 
 class NewPasswordPage extends StatelessWidget {
   @override
@@ -443,7 +535,7 @@ class NewPasswordForm extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CodeField(),
+                  TempPasswordField(),
                   SizedBox(height: 20),
                   NewPasswordField(),
                   SizedBox(height: 20),
@@ -458,12 +550,32 @@ class NewPasswordForm extends StatelessWidget {
   }
 }
 
+class TempPasswordField extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      decoration: InputDecoration(
+        hintText: "Temp Password",
+        helperText: ("Please use this code that was provided in the package."),
+        filled: true,
+        fillColor: Colors.grey[300],
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        suffixIcon: Icon(Icons.lock),
+      ),
+    );
+  }
+}
+
 class NewPasswordField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TextField(
       decoration: InputDecoration(
         hintText: "New Password",
+        helperText: ("Please create a new password."),
         filled: true,
         fillColor: Colors.grey[300],
         border: OutlineInputBorder(
@@ -487,6 +599,7 @@ class VerifyNewPasswordField extends StatelessWidget {
           obscureText: true,
           decoration: InputDecoration(
             hintText: "Verify Password",
+            helperText: ("Please re-enter your new password."),
             filled: true,
             fillColor: Colors.grey[300],
             border: OutlineInputBorder(
@@ -497,7 +610,7 @@ class VerifyNewPasswordField extends StatelessWidget {
           ),
         ),
 
-        SizedBox(height: 8),
+        SizedBox(height: 20),
         // 2. Instruction text
         Text(
           "Password must contain:\n"
@@ -506,6 +619,17 @@ class VerifyNewPasswordField extends StatelessWidget {
           "- 1 number\n"
           "- 1 special character",
           style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+        ),
+
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => LoginPage()),
+            );
+          },
+          child: const Text("Back to Login"),
         ),
       ],
     );
