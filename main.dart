@@ -35,7 +35,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(debugShowCheckedModeBanner: false, home: HomePage());
+    return MaterialApp(debugShowCheckedModeBanner: false, home: LoginPage());
   }
 }
 
@@ -808,6 +808,7 @@ class SpecsTable extends StatelessWidget {
     return ListView.builder(
       padding: EdgeInsets.all(12),
       itemCount: items.length,
+
       itemBuilder: (context, index) {
         final item = items[index];
 
@@ -927,35 +928,54 @@ class SightingsPage extends StatelessWidget {
   }
 }
 
-class FavoritesTable extends StatelessWidget {
+class FavoritesTable extends StatefulWidget {
+  @override
+  State<FavoritesTable> createState() => _FavoritesTableState();
+}
+
+class _FavoritesTableState extends State<FavoritesTable> {
+  List<dynamic> sightings = [];
+
+  @override
+  void initState() {
+    super.initState();
+    fetchSightings();
+  }
+
+  Future<void> fetchSightings() async {
+    final response = await Supabase.instance.client
+        .from('bird_sightings')
+        .select()
+        .order('timestamp', ascending: false);
+
+    setState(() {
+      sightings = response;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final items = [
-      ["Common Name", "Time Stamp", "Profile"],
-      ["A", "x-x", "l"],
-      ["B", "x-x", "l"],
-      ["C", "x-x", "l"],
-      ["D", "x-x", "l"],
-      ["E", "x-x", "l"],
-      ["F", "x-x", "l"],
-      ["G", "x-x", "l"],
-      ["H", "x-x", "l"],
-      ["I", "x-x", "l"],
-    ];
-
-    return ListView(
+    return ListView.builder(
       padding: EdgeInsets.all(16),
-      children: items.asMap().entries.map((entry) {
-        int index = entry.key;
-        var item = entry.value;
+      itemCount: sightings.length,
+      itemBuilder: (context, index) {
+        final item = sightings[index];
+
+        final ebirdInfo = item['ebird_info'];
+
+        final commonName = item['common_name'] ?? ebirdInfo?['common_name'];
+
+        final species = item['predicted_species'];
+        final timestamp = item['timestamp'];
+        final confidence = item['confidence'] ?? 0;
 
         return TableRowItem(
-          name: item[0],
-          type: item[1],
-          status: item[2],
+          name: commonName ?? species,
+          type: timestamp.toString(),
+          status: "${(confidence * 100).toStringAsFixed(1)}%",
           index: index,
         );
-      }).toList(),
+      },
     );
   }
 }
