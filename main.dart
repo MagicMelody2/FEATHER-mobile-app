@@ -1,10 +1,15 @@
 // flutter run -d chrome
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'dart:ui';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:async';
+import 'package:app_links/app_links.dart';
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,30 +17,74 @@ Future<void> main() async {
   await Supabase.initialize(
     url: 'https://llddhtatznrbrhxoniqc.supabase.co',
     anonKey: 'sb_publishable_48nEIOwcY4KGdg4ClqIC-w_VGsKOXLZ',
+
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+    ),
   );
-
-  print("Supabase initialized!");
-
-  try {
-    final response = await Supabase.instance.client
-        .from('bird_sightings')
-        .select();
-
-    print("Backend connected!");
-    print(response);
-  } catch (e) {
-    print("Connection failed: $e");
-  }
-
-  runApp(const MyApp());
+  runApp(MyApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MyApp extends StatefulWidget {
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  bool _hasHandledLink = false;
+
+  final _appLinks = AppLinks();
+  late final StreamSubscription _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    final uri = await _appLinks.getInitialLink();
+    if (uri != null) {
+      _handleDeepLink(uri);
+    }
+
+    _sub = _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    });
+  }
+
+  Future<void> _handleDeepLink(Uri uri) async {
+    print("HANDLING DEEPLINK: $uri");
+
+    if (_hasHandledLink) return;
+    _hasHandledLink = true;
+
+    try {
+      await Supabase.instance.client.auth.getSessionFromUrl(uri);
+      print("Session restored");
+    } catch (e) {
+      print("Auth error: $e");
+    }
+
+    final path = uri.path.replaceAll("/", "");
+
+    if (uri.scheme == "feather" && path == "login-callback") {
+      navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => ResetPasswordPage()),
+        (route) => false,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(debugShowCheckedModeBanner: false, home: LoginPage());
+    return MaterialApp(navigatorKey: navigatorKey, home: LoginPage());
+  }
+
+  @override
+  void dispose() {
+    _sub.cancel();
+    super.dispose();
   }
 }
 
@@ -59,10 +108,20 @@ class HomePage extends StatelessWidget {
   }
 
   Future<void> testDB() async {
+    final supabase = Supabase.instance.client;
+
+    final user = supabase.auth.currentUser;
+
+    if (user == null) {
+      print("No logged-in user");
+      return;
+    }
+
     try {
-      final response = await Supabase.instance.client
+      final response = await supabase
           .from('bird_sightings')
-          .select();
+          .select()
+          .eq('user_id', user.id);
 
       print("TABLE: bird_sightings");
       print(response);
@@ -90,9 +149,40 @@ class HomePage extends StatelessWidget {
             ElevatedButton(onPressed: callAPI, child: const Text("Call API")),
             ElevatedButton(onPressed: testDB, child: const Text("Test DB")),
             ElevatedButton(onPressed: getBirds, child: const Text("getBirds")),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => LoginPage()),
+                );
+              },
+              child: const Text("Go to Login"),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class PasswordRequirementField extends StatelessWidget {
+  const PasswordRequirementField({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        Text(
+          "Password requirements:",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        SizedBox(height: 8),
+        Text("• At least 8 characters"),
+        Text("• One uppercase letter"),
+        Text("• One number"),
+        Text("• One special character"),
+      ],
     );
   }
 }
@@ -212,6 +302,12 @@ class _LoginFormState extends State<LoginForm> {
         MaterialPageRoute(builder: (context) => MainLayout()),
       );
     } catch (e) {
+      final message = "Email or password does not match";
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
+      );
+
       print("FULL ERROR: ${e.toString()}");
     }
   }
@@ -281,7 +377,7 @@ class UsernameField extends StatelessWidget {
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => NewPasswordPage()),
+              MaterialPageRoute(builder: (context) => NewUserPage()),
             );
           },
           child: Text(
@@ -328,7 +424,7 @@ class PasswordField extends StatelessWidget {
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (context) => SignUpPage()),
+              MaterialPageRoute(builder: (context) => EmailRecoveryPage()),
             );
           },
           child: Text(
@@ -344,14 +440,14 @@ class PasswordField extends StatelessWidget {
   }
 }
 
-// -------------------------- Sign Up Page -------------------------- \\
+// -------------------------- Email Recovery Page -------------------------- \\
 
-class SignUpPage extends StatefulWidget {
+class EmailRecoveryPage extends StatefulWidget {
   @override
-  State<SignUpPage> createState() => _SignUpPageState();
+  State<EmailRecoveryPage> createState() => _EmailRecoveryPageState();
 }
 
-class _SignUpPageState extends State<SignUpPage> {
+class _EmailRecoveryPageState extends State<EmailRecoveryPage> {
   final TextEditingController emailController = TextEditingController();
 
   bool isLoading = false;
@@ -405,72 +501,82 @@ class _SignUpPageState extends State<SignUpPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         EmailField(controller: emailController),
-
                         const SizedBox(height: 20),
 
-                        ElevatedButton(
-                          onPressed: (isLoading || cooldown > 0)
-                              ? null
-                              : () async {
-                                  final email = emailController.text.trim();
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            ElevatedButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => LoginPage(),
+                                  ),
+                                );
+                              },
+                              child: const Text("Back to Login"),
+                            ),
 
-                                  if (email.isEmpty) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text("Enter your email"),
-                                      ),
-                                    );
-                                    return;
-                                  }
+                            ElevatedButton(
+                              onPressed: (isLoading || cooldown > 0)
+                                  ? null
+                                  : () async {
+                                      final email = emailController.text.trim();
 
-                                  setState(() {
-                                    isLoading = true;
-                                  });
+                                      if (email.isEmpty) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text("Enter your email"),
+                                          ),
+                                        );
+                                        return;
+                                      }
 
-                                  try {
-                                    await Supabase.instance.client.auth
-                                        .resetPasswordForEmail(
-                                          email,
-                                          redirectTo:
-                                              "feather://reset-password",
+                                      setState(() {
+                                        isLoading = true;
+                                      });
+
+                                      try {
+                                        await Supabase.instance.client.auth
+                                            .resetPasswordForEmail(
+                                              emailController.text.trim(),
+                                              redirectTo:
+                                                  'feather://login-callback/',
+                                            );
+
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text("Reset email sent"),
+                                          ),
                                         );
 
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text("Reset email sent"),
-                                      ),
-                                    );
-
-                                    startCooldown();
-                                  } on AuthException catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(e.message)),
-                                    );
-                                  } finally {
-                                    setState(() {
-                                      isLoading = false;
-                                    });
-                                  }
-                                },
-                          child: Text(
-                            cooldown > 0
-                                ? "Wait ${cooldown}s"
-                                : (isLoading
-                                      ? "Sending..."
-                                      : "Send Reset Link"),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => LoginPage(),
+                                        startCooldown();
+                                      } on AuthException catch (e) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(content: Text(e.message)),
+                                        );
+                                      } finally {
+                                        setState(() {
+                                          isLoading = false;
+                                        });
+                                      }
+                                    },
+                              child: Text(
+                                cooldown > 0
+                                    ? "Wait ${cooldown}s"
+                                    : (isLoading
+                                          ? "Sending..."
+                                          : "Send Reset Link"),
                               ),
-                            );
-                          },
-                          child: const Text("Back to Login"),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -507,42 +613,344 @@ class EmailField extends StatelessWidget {
   }
 }
 
-// -------------------------- New User -------------------------- \\
+// -------------------------- Forgot Password -------------------------- \\
 
-class NewPasswordPage extends StatelessWidget {
+class ResetPasswordPage extends StatefulWidget {
+  @override
+  State<ResetPasswordPage> createState() => _ResetPasswordPageState();
+}
+
+class _ResetPasswordPageState extends State<ResetPasswordPage> {
+  final passwordController = TextEditingController();
+  final confirmController = TextEditingController();
+  final emailController = TextEditingController();
+  final tempCodeController = TextEditingController();
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    confirmController.dispose();
+    tempCodeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> updatePassword() async {
+    final pass = passwordController.text.trim();
+    final confirm = confirmController.text.trim();
+    final email = emailController.text.trim();
+    final tempCode = tempCodeController.text.trim();
+    final supabase = Supabase.instance.client;
+
+    // -------------------------
+    // BASIC VALIDATION
+    // -------------------------
+    if (pass != confirm) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+      return;
+    }
+
+    final hasMinLength = pass.length >= 8;
+    final hasUppercase = RegExp(r'[A-Z]').hasMatch(pass);
+    final hasNumber = RegExp(r'[0-9]').hasMatch(pass);
+    final hasSpecial = RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(pass);
+
+    if (!hasMinLength || !hasUppercase || !hasNumber || !hasSpecial) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Password does not meet requirements")),
+      );
+      return;
+    }
+
+    try {
+      final user = supabase.auth.currentUser;
+
+      // =========================
+      // RESET PASSWORD FLOW
+      // =========================
+      if (user != null) {
+        final response = await supabase.auth.updateUser(
+          UserAttributes(password: pass),
+        );
+
+        if (response.user == null) {
+          throw Exception("Password update failed");
+        }
+
+        await supabase.auth.signOut();
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Password updated successfully")),
+        );
+
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => LoginPage()),
+          (route) => false,
+        );
+
+        return; // IMPORTANT: stop here
+      }
+
+      // =========================
+      // NEW ACCOUNT FLOW
+      // =========================
+
+      final result = await supabase
+          .from('device_codes')
+          .select()
+          .eq('email', email)
+          .eq('temp_code', tempCode)
+          .eq('used', false)
+          .maybeSingle();
+
+      if (result == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Invalid activation code")),
+        );
+        return;
+      }
+
+      await supabase.auth.signInWithPassword(email: email, password: tempCode);
+
+      await supabase.auth.updateUser(UserAttributes(password: pass));
+
+      await supabase
+          .from('device_codes')
+          .update({'used': true, 'used_at': DateTime.now().toIso8601String()})
+          .eq('id', result['id']);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Account created! Please log in.")),
+      );
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => LoginPage()),
+        (route) => false,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(children: [BackgroundImage(), NewPasswordForm()]),
-    );
-  }
-}
+      body: Stack(
+        children: [
+          BackgroundImage(),
 
-class NewPasswordForm extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment(0, 0.6),
-      child: Padding(
-        padding: EdgeInsets.only(bottom: 0, left: 20, right: 20),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              padding: EdgeInsets.all(20),
-              color: Colors.white.withValues(alpha: 0.5),
+          Align(
+            alignment: const Alignment(0, 0.2),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  TempPasswordField(),
-                  SizedBox(height: 20),
-                  NewPasswordField(),
-                  SizedBox(height: 20),
-                  VerifyNewPasswordField(),
+                  const SizedBox(height: 200),
+                  PasswordRequirementField(),
+
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        color: Colors.white.withOpacity(0.5),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            NewPasswordField(controller: passwordController),
+                            const SizedBox(height: 20),
+                            VerifyNewPasswordField(
+                              controller: confirmController,
+                            ),
+                            const SizedBox(height: 20),
+                            ElevatedButton(
+                              onPressed: updatePassword,
+                              child: const Text("Update Password"),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+// -------------------------- New User -------------------------- \\
+
+class NewUserPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(body: Stack(children: [NewUserPageForm()]));
+  }
+}
+
+class NewUserPageForm extends StatefulWidget {
+  const NewUserPageForm({super.key});
+
+  @override
+  State<NewUserPageForm> createState() => _NewUserPageFormState();
+}
+
+class _NewUserPageFormState extends State<NewUserPageForm> {
+  final emailController = TextEditingController();
+  final tempCodeController = TextEditingController();
+  final passwordController = TextEditingController();
+  final confirmController = TextEditingController();
+
+  final supabase = Supabase.instance.client;
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    tempCodeController.dispose();
+    passwordController.dispose();
+    confirmController.dispose();
+    super.dispose();
+  }
+
+  bool passwordsMatch() {
+    return passwordController.text.trim() == confirmController.text.trim();
+  }
+
+  bool isValidPassword(String pass) {
+    final hasMinLength = pass.length >= 8;
+    final hasUppercase = RegExp(r'[A-Z]').hasMatch(pass);
+    final hasNumber = RegExp(r'[0-9]').hasMatch(pass);
+    final hasSpecial = RegExp(r'[!@#$%^&*(),.?":{}|<>]').hasMatch(pass);
+
+    return hasMinLength && hasUppercase && hasNumber && hasSpecial;
+  }
+
+  Future<void> activateAccount() async {
+    final email = emailController.text.trim().toLowerCase();
+    final tempCode = tempCodeController.text.trim();
+    final newPassword = passwordController.text.trim();
+
+    try {
+      // 1. Call secure backend function (IMPORTANT)
+      final response = await supabase.functions.invoke(
+        'activate_device',
+        body: {
+          'email': email,
+          'temp_code': tempCode,
+          'new_password': newPassword,
+        },
+      );
+
+      if (response.status != 200) {
+        throw Exception("Activation failed");
+      }
+
+      // 2. Now log user in with new password
+      final loginResponse = await supabase.auth.signInWithPassword(
+        email: email,
+        password: newPassword,
+      );
+
+      if (loginResponse.user == null) {
+        throw Exception("Login failed after activation");
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Account activated successfully")),
+      );
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => HomePage()),
+        (route) => false,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: const Alignment(0, 0.6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              EmailField(controller: emailController),
+              const SizedBox(height: 20),
+              TempPasswordField(controller: tempCodeController),
+              const SizedBox(height: 20),
+              NewPasswordField(controller: passwordController),
+              const SizedBox(height: 20),
+              VerifyNewPasswordField(controller: confirmController),
+              const SizedBox(height: 20),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => LoginPage()),
+                      );
+                    },
+                    child: const Text("Back to Login"),
+                  ),
+
+                  ElevatedButton(
+                    onPressed: () async {
+                      final pass = passwordController.text.trim();
+
+                      if (!passwordsMatch()) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Passwords do not match"),
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (!isValidPassword(pass)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              "Password does not meet requirements",
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      await activateAccount();
+                    },
+                    child: const Text("Activate Account"),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -551,87 +959,58 @@ class NewPasswordForm extends StatelessWidget {
 }
 
 class TempPasswordField extends StatelessWidget {
+  final TextEditingController controller;
+
+  const TempPasswordField({super.key, required this.controller});
+
   @override
   Widget build(BuildContext context) {
     return TextField(
+      controller: controller,
       decoration: InputDecoration(
-        hintText: "Temp Password",
-        helperText: ("Please use this code that was provided in the package."),
-        filled: true,
-        fillColor: Colors.grey[300],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        suffixIcon: Icon(Icons.lock),
+        hintText: "Activation Code",
+        helperText: "Use the activation code included with your device.",
       ),
     );
   }
 }
 
 class NewPasswordField extends StatelessWidget {
+  final TextEditingController controller;
+
+  const NewPasswordField({super.key, required this.controller});
+
   @override
   Widget build(BuildContext context) {
     return TextField(
+      controller: controller,
       decoration: InputDecoration(
         hintText: "New Password",
-        helperText: ("Please create a new password."),
+        helperText: "Please create a new password.",
         filled: true,
         fillColor: Colors.grey[300],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        suffixIcon: Icon(Icons.lock),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
 }
 
 class VerifyNewPasswordField extends StatelessWidget {
+  final TextEditingController controller;
+
+  const VerifyNewPasswordField({super.key, required this.controller});
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 1. Input field
-        TextField(
-          obscureText: true,
-          decoration: InputDecoration(
-            hintText: "Verify Password",
-            helperText: ("Please re-enter your new password."),
-            filled: true,
-            fillColor: Colors.grey[300],
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            suffixIcon: Icon(Icons.lock),
-          ),
-        ),
-
-        SizedBox(height: 20),
-        // 2. Instruction text
-        Text(
-          "Password must contain:\n"
-          "- 8 characters minimum\n"
-          "- uppercase and lowercase letters\n"
-          "- 1 number\n"
-          "- 1 special character",
-          style: TextStyle(fontSize: 12, color: Colors.grey[700]),
-        ),
-
-        const SizedBox(height: 20),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => LoginPage()),
-            );
-          },
-          child: const Text("Back to Login"),
-        ),
-      ],
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        hintText: "Confirm Password",
+        helperText: "Please confirm your new password.",
+        filled: true,
+        fillColor: Colors.grey[300],
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     );
   }
 }
@@ -685,6 +1064,17 @@ class _DashboardPageState extends State<DashboardPage> {
         .eq('id', user.id);
 
     await loadUser(); // refresh UI
+  }
+
+  Future<void> logout() async {
+    await Supabase.instance.client.auth.signOut();
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => LoginPage()),
+      (route) => false,
+    );
   }
 
   @override
@@ -845,6 +1235,14 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
               ],
+            ),
+          ),
+          Positioned(
+            top: 20,
+            right: 20,
+            child: ElevatedButton(
+              onPressed: logout,
+              child: const Text("Log Out"),
             ),
           ),
         ],
@@ -1052,6 +1450,35 @@ class SightingsPage extends StatelessWidget {
   }
 }
 
+class BirdSightingsService {
+  final supabase = Supabase.instance.client;
+
+  Future<List<dynamic>> getMySightings() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return [];
+
+    return await supabase
+        .from('bird_sightings')
+        .select()
+        .eq('user_id', user.id)
+        .order('timestamp', ascending: false);
+  }
+
+  Future<void> addSighting({
+    required String species,
+    required double confidence,
+  }) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    await supabase.from('bird_sightings').insert({
+      'user_id': user.id,
+      'predicted_species': species,
+      'confidence': confidence,
+    });
+  }
+}
+
 class FavoritesTable extends StatefulWidget {
   @override
   State<FavoritesTable> createState() => _FavoritesTableState();
@@ -1063,17 +1490,21 @@ class _FavoritesTableState extends State<FavoritesTable> {
   @override
   void initState() {
     super.initState();
-    fetchSightings();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      fetchSightings();
+    });
   }
 
   Future<void> fetchSightings() async {
-    final response = await Supabase.instance.client
-        .from('bird_sightings')
-        .select()
-        .order('timestamp', ascending: false);
+    final service = BirdSightingsService();
+
+    final data = await service.getMySightings();
+
+    if (!mounted) return;
 
     setState(() {
-      sightings = response;
+      sightings = data;
     });
   }
 
@@ -1085,7 +1516,7 @@ class _FavoritesTableState extends State<FavoritesTable> {
       itemBuilder: (context, index) {
         final item = sightings[index];
 
-        final ebirdInfo = item['ebird_info'];
+        final ebirdInfo = item['ebird_info'] is Map ? item['ebird_info'] : null;
 
         final commonName = item['common_name'] ?? ebirdInfo?['common_name'];
 
