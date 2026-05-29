@@ -22,6 +22,7 @@ Future<void> main() async {
       authFlowType: AuthFlowType.pkce,
     ),
   );
+
   runApp(MyApp());
 }
 
@@ -51,6 +52,17 @@ class _MyAppState extends State<MyApp> {
     _sub = _appLinks.uriLinkStream.listen((uri) {
       _handleDeepLink(uri);
     });
+
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+
+      if (event == AuthChangeEvent.passwordRecovery) {
+        navigatorKey.currentState?.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => ResetPasswordPage()),
+          (route) => false,
+        );
+      }
+    });
   }
 
   Future<void> _handleDeepLink(Uri uri) async {
@@ -58,22 +70,6 @@ class _MyAppState extends State<MyApp> {
 
     if (_hasHandledLink) return;
     _hasHandledLink = true;
-
-    try {
-      await Supabase.instance.client.auth.getSessionFromUrl(uri);
-      print("Session restored");
-    } catch (e) {
-      print("Auth error: $e");
-    }
-
-    final path = uri.path.replaceAll("/", "");
-
-    if (uri.scheme == "feather" && path == "login-callback") {
-      navigatorKey.currentState?.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => ResetPasswordPage()),
-        (route) => false,
-      );
-    }
   }
 
   @override
@@ -544,7 +540,7 @@ class _EmailRecoveryPageState extends State<EmailRecoveryPage> {
                                             .resetPasswordForEmail(
                                               emailController.text.trim(),
                                               redirectTo:
-                                                  'feather://login-callback/',
+                                                  'feather://reset-password/',
                                             );
 
                                         ScaffoldMessenger.of(
@@ -877,7 +873,7 @@ class _NewUserPageFormState extends State<NewUserPageForm> {
 
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => HomePage()),
+        MaterialPageRoute(builder: (_) => LoginPage()),
         (route) => false,
       );
     } catch (e) {
@@ -1024,10 +1020,19 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   String? username;
 
+  int totalSightings = 0;
+  String? mostCommonBird;
+  String? rarestBird;
+
   @override
   void initState() {
     super.initState();
-    loadUser(); // 👈 ONLY load data
+    initDashboard();
+  }
+
+  Future<void> initDashboard() async {
+    await loadUser();
+    await loadBirdStats();
   }
 
   Future<void> loadUser() async {
@@ -1044,12 +1049,92 @@ class _DashboardPageState extends State<DashboardPage> {
         .eq('id', user.id)
         .maybeSingle();
 
-    setState(() {
-      final value = data?['username'];
+    if (!mounted) return;
 
+    final value = data?['username'];
+
+    setState(() {
       username = (value == null || value.toString().trim().isEmpty)
           ? 'User'
           : value.toString();
+    });
+  }
+
+  Future<void> loadBirdStats() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final data = await Supabase.instance.client
+        .from('bird_sightings')
+        .select()
+        .eq('user_id', user.id);
+
+    final List rows = data;
+
+    final Map<String, int> counts = {};
+
+    // double highestConfidence = 0.0;
+    // String? highestConfidenceBird;
+
+    for (final row in rows) {
+      final species = row['predicted_species'];
+      //final confidence = (row['confidence'] ?? 0).toDouble();
+
+      // ---------- SAFE ebird parsing ----------
+      String? name;
+
+      try {
+        final ebird = jsonDecode(row['ebird_info'] ?? '{}');
+        name = ebird['common_name'];
+      } catch (_) {
+        name = species;
+      }
+
+      final finalName = (name == null || name.toString().isEmpty)
+          ? species
+          : name;
+
+      final displayName = finalName?.replaceAll('_', ' ');
+
+      // ---------- frequency count ----------
+      if (displayName != null) {
+        counts[displayName] = (counts[displayName] ?? 0) + 1;
+      }
+
+      /* ---------- highest confidence ----------
+      if (confidence > highestConfidence) {
+        highestConfidence = confidence;
+        highestConfidenceBird = finalName;
+      }
+      */
+    }
+
+    String? mostCommon;
+    String? rarest;
+
+    if (counts.isNotEmpty) {
+      mostCommon = counts.entries
+          .reduce((a, b) => a.value >= b.value ? a : b)
+          .key;
+
+      final minCount = counts.values.reduce((a, b) => a < b ? a : b);
+
+      final rareList = counts.entries
+          .where((e) => e.value == minCount)
+          .toList();
+
+      rarest = rareList.first.key;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      totalSightings = rows.length;
+      mostCommonBird = mostCommon;
+      rarestBird = rarest;
+
+      // optional but now properly stored
+      // highestConfidenceBird = highestConfidenceBird;
     });
   }
 
@@ -1063,7 +1148,7 @@ class _DashboardPageState extends State<DashboardPage> {
         .update({'username': 'Gracie'})
         .eq('id', user.id);
 
-    await loadUser(); // refresh UI
+    await loadUser();
   }
 
   Future<void> logout() async {
@@ -1080,172 +1165,145 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          // 👋 Welcome Text (FIXED LOCATION)
-          Positioned(
-            top: 20,
-            left: 20,
-            child: Text(
-              "Welcome ${username ?? "..."}",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-          ),
-
-          // 🔋 Battery box
-          Positioned(
-            top: 70,
-            left: 20,
-            child: Container(
-              width: 170,
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(0xFFC6C3C3),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 👋 Header row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Welcome ${username ?? "..."}",
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: logout,
+                    child: const Text("Log Out"),
                   ),
                 ],
               ),
-              child: Center(
-                child: Icon(
-                  Icons.battery_full,
-                  size: 100,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
 
-          // ➕ Top right box
-          Positioned(
-            top: 70,
-            right: 20,
-            child: Container(
-              width: 170,
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(0xFFC6C3C3),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
+              const SizedBox(height: 30),
+
+              // 🔋 4 boxes row
+              Row(
+                children: [
+                  Expanded(child: buildBox(Icons.battery_full)),
+                  const SizedBox(width: 10),
+
+                  Expanded(
+                    child: buildBox(
+                      //null,
+                      // Icons.local_see_outlined,
+                      Icons.visibility_outlined,
+                      value: totalSightings.toString(),
+                      label: "Total Sightings",
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+
+                  Expanded(
+                    child: buildBox(
+                      Icons.bar_chart,
+                      //Icons.public_rounded,
+                      //Icons.merge,
+                      //Icons.flutter_dash,
+                      value: mostCommonBird ?? "...",
+                      label: "Common Sightings",
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+
+                  Expanded(
+                    child: buildBox(
+                      Icons.emoji_events,
+                      value: rarestBird ?? "...",
+                      label: "Rarest Sightings",
+                    ),
                   ),
                 ],
               ),
-              child: Center(
-                child: Icon(
-                  Icons.add_circle_outline_rounded,
-                  size: 100,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
 
-          // ➕ Bottom left
-          Positioned(
-            top: 250,
-            left: 20,
-            child: Container(
-              width: 170,
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(0xFFC6C3C3),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.add_circle_outline_rounded,
-                  size: 100,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
+              const SizedBox(height: 30),
 
-          // ➕ Bottom right
-          Positioned(
-            top: 250,
-            right: 20,
-            child: Container(
-              width: 170,
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(0xFFC6C3C3),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
+              const Text(
+                "Favorites",
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
-              child: Center(
-                child: Icon(
-                  Icons.add_circle_outline_rounded,
-                  size: 100,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
 
-          // ⭐ Favorites section
-          Positioned(
-            top: 370,
-            left: 20,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(height: 50),
-                Text(
-                  "Favorites",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
+              const SizedBox(height: 10),
 
-                SizedBox(height: 10),
-
-                Container(
-                  width: 360,
-                  height: 150,
+              Expanded(
+                child: Container(
+                  width: double.infinity,
                   decoration: BoxDecoration(
                     color: const Color(0xFFC6C3C3),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
+                        color: Colors.black26,
                         blurRadius: 10,
                         offset: Offset(0, 4),
                       ),
                     ],
                   ),
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildBox(IconData? icon, {String? label, String? value}) {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFC6C3C3),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // ICON (only if provided)
+              if (icon != null) ...[
+                Icon(icon, size: 70, color: Colors.black87),
+                const SizedBox(height: 6),
               ],
-            ),
+
+              // VALUE
+              Text(
+                value ?? "",
+                style: TextStyle(
+                  fontSize: icon == null ? 30 : 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              // LABEL
+              Text(
+                label ?? "",
+                style: TextStyle(fontSize: icon == null ? 30 : 20),
+              ),
+            ],
           ),
-          Positioned(
-            top: 20,
-            right: 20,
-            child: ElevatedButton(
-              onPressed: logout,
-              child: const Text("Log Out"),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1259,9 +1317,8 @@ class DeviceSpecsPage extends StatelessWidget {
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(height: 20),
+            SizedBox(height: 30),
             Text(
               "Device Specs",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
@@ -1282,49 +1339,61 @@ class SpecsTable extends StatelessWidget {
       ["Subsystem", "Key Specifications"],
 
       [
-        "Processing Unit\nRaspberry Pi 5",
-        "Quad-core Cortex-A76 (2.4 GHz)\nVideoCore VII GPU\nUp to 16GB RAM",
-      ],
-
-      ["Image Sensor\nIMX477", "12.3 MP\nHigh-resolution CMOS sensor"],
-
-      [
-        "Lens System\n16mm C-mount",
-        "F1.4–F16 aperture\nAdjustable focus\nMid-range field of view",
+        "Processing Unit: Raspberry Pi 5",
+        "Quad-core Cortex-A76 (2.4 GHz)\nVideoCore VII GPU\t\t|\t\t\tUp to 16GB RAM",
       ],
 
       [
-        "Control Module\nESP32-S3",
-        "Dual-core MCU\nWiFi + Bluetooth\nMultiple GPIO",
+        "Image Sensor: IMX477",
+        "12.3 MP\t\t\t|\t\t\tHigh-resolution CMOS sensor",
       ],
 
       [
-        "Environmental Sensor\nBME280",
-        "Temperature\nHumidity\nPressure (I2C/SPI)",
+        "Lens System: 16mm C-mount",
+        "F1.4–F16 aperture\t\t\t|\t\t\tAdjustable focus\t\t\t|\t\t\tMid-range field of view",
       ],
 
       [
-        "Power Monitor\nINA260",
-        "Voltage + current monitoring\nI2C, no external shunt required",
+        "Control Module: ESP32-S3",
+        "Dual-core MCU\t\t\t|\t\t\tWiFi + Bluetooth\t\t\t|\t\t\tMultiple GPIO",
       ],
 
       [
-        "GPS Module\nNEO-6M",
-        "GNSS positioning\n~2.5m accuracy\nUART interface",
+        "Environmental Sensor: BME280",
+        "Temperature\t\t\t|\t\t\tHumidity\t\t\t|\t\t\tPressure (I2C/SPI)",
       ],
-
-      ["Power System\n11.1V Li-ion", "3S2P configuration\n~5.7Ah capacity"],
 
       [
-        "Voltage Regulation\nLM2679",
-        "3.3V / 5V output\nHigh-efficiency switching regulator",
+        "Power Monitor: INA260",
+        "Voltage + current monitoring\t\t\t|\t\t\tI2C, no external shunt required",
       ],
 
-      ["System Display\nOLED", "48×64 resolution\nLow power\nI2C interface"],
+      [
+        "GPS Module: NEO-6M",
+        "GNSS positioning\t\t\t|\t\t\t~2.5m accuracy\t\t\t|\t\t\tUART interface",
+      ],
 
-      ["Eyepiece Display\nDM-OLED071", "1920×1080 microOLED\nHDMI input"],
+      [
+        "Power System: 11.1V Li-ion",
+        "3S2P configuration\t\t\t|\t\t\t~5.7Ah capacity",
+      ],
 
-      ["USB Interface\nCP2102", "USB-to-UART bridge"],
+      [
+        "Voltage Regulation: LM2679",
+        "3.3V / 5V output\t\t\t|\t\t\tHigh-efficiency switching regulator",
+      ],
+
+      [
+        "System Display: OLED",
+        "48×64 resolution\t\t\t|\t\t\tLow power\t\t\t|\t\t\tI2C interface",
+      ],
+
+      [
+        "Eyepiece Display: DM-OLED071",
+        "1920×1080 microOLED\t\t\t|\t\t\tHDMI input",
+      ],
+
+      ["USB Interface: CP2102", "USB-to-UART bridge"],
     ];
 
     return ListView.builder(
@@ -1370,17 +1439,25 @@ class TableRowSpecsItem extends StatelessWidget {
             flex: 2,
             child: Text(
               name,
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              style: TextStyle(
+                fontWeight: index == 0 ? FontWeight.bold : FontWeight.normal,
+                fontStyle: FontStyle.italic,
+                fontSize: 20,
+              ),
             ),
           ),
 
-          SizedBox(width: 10),
+          SizedBox(width: 0),
 
           Expanded(
             flex: 3,
             child: Text(
               type,
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              style: TextStyle(
+                fontWeight: index == 0 ? FontWeight.bold : FontWeight.normal,
+                fontStyle: index == 0 ? FontStyle.italic : FontStyle.normal,
+                fontSize: 20,
+              ),
               softWrap: true,
             ),
           ),
@@ -1400,7 +1477,7 @@ class SearchPage extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            SizedBox(height: 20),
+            SizedBox(height: 30),
             Text(
               "Search",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
