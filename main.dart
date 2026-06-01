@@ -8,6 +8,7 @@ import 'dart:ui';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:app_links/app_links.dart';
+import 'bird_details_page.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -1024,6 +1025,8 @@ class _DashboardPageState extends State<DashboardPage> {
   String? mostCommonBird;
   String? rarestBird;
 
+  List<dynamic> favorites = [];
+
   @override
   void initState() {
     super.initState();
@@ -1033,8 +1036,10 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> initDashboard() async {
     await loadUser();
     await loadBirdStats();
+    await loadFavorites();
   }
 
+  // ---------------- USER ----------------
   Future<void> loadUser() async {
     final user = Supabase.instance.client.auth.currentUser;
 
@@ -1051,15 +1056,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
     if (!mounted) return;
 
-    final value = data?['username'];
-
     setState(() {
-      username = (value == null || value.toString().trim().isEmpty)
-          ? 'User'
-          : value.toString();
+      final raw = data?['username'];
+
+      final clean = (raw == null) ? null : raw.toString().trim();
+
+      username = (clean == null || clean.isEmpty) ? 'User' : clean;
     });
   }
 
+  // ---------------- STATS ----------------
   Future<void> loadBirdStats() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -1073,14 +1079,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
     final Map<String, int> counts = {};
 
-    // double highestConfidence = 0.0;
-    // String? highestConfidenceBird;
-
     for (final row in rows) {
       final species = row['predicted_species'];
-      //final confidence = (row['confidence'] ?? 0).toDouble();
 
-      // ---------- SAFE ebird parsing ----------
       String? name;
 
       try {
@@ -1096,17 +1097,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
       final displayName = finalName?.replaceAll('_', ' ');
 
-      // ---------- frequency count ----------
       if (displayName != null) {
         counts[displayName] = (counts[displayName] ?? 0) + 1;
       }
-
-      /* ---------- highest confidence ----------
-      if (confidence > highestConfidence) {
-        highestConfidence = confidence;
-        highestConfidenceBird = finalName;
-      }
-      */
     }
 
     String? mostCommon;
@@ -1132,15 +1125,30 @@ class _DashboardPageState extends State<DashboardPage> {
       totalSightings = rows.length;
       mostCommonBird = mostCommon;
       rarestBird = rarest;
-
-      // optional but now properly stored
-      // highestConfidenceBird = highestConfidenceBird;
     });
   }
 
+  // ---------------- FAVORITES ----------------
+  Future<void> loadFavorites() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final data = await Supabase.instance.client
+        .from('user_favorites')
+        .select()
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false);
+
+    if (!mounted) return;
+
+    setState(() {
+      favorites = data;
+    });
+  }
+
+  // ---------------- USER ACTIONS ----------------
   Future<void> updateUsername() async {
     final user = Supabase.instance.client.auth.currentUser;
-
     if (user == null) return;
 
     await Supabase.instance.client
@@ -1162,6 +1170,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1171,7 +1180,7 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 👋 Header row
+              // HEADER
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -1191,35 +1200,27 @@ class _DashboardPageState extends State<DashboardPage> {
 
               const SizedBox(height: 30),
 
-              // 🔋 4 boxes row
+              // STATS ROW
               Row(
                 children: [
                   Expanded(child: buildBox(Icons.battery_full)),
                   const SizedBox(width: 10),
-
                   Expanded(
                     child: buildBox(
-                      //null,
-                      // Icons.local_see_outlined,
                       Icons.visibility_outlined,
                       value: totalSightings.toString(),
                       label: "Total Sightings",
                     ),
                   ),
                   const SizedBox(width: 10),
-
                   Expanded(
                     child: buildBox(
                       Icons.bar_chart,
-                      //Icons.public_rounded,
-                      //Icons.merge,
-                      //Icons.flutter_dash,
                       value: mostCommonBird ?? "...",
                       label: "Common Sightings",
                     ),
                   ),
                   const SizedBox(width: 10),
-
                   Expanded(
                     child: buildBox(
                       Icons.emoji_events,
@@ -1239,13 +1240,14 @@ class _DashboardPageState extends State<DashboardPage> {
 
               const SizedBox(height: 10),
 
+              // FAVORITES BOX
               Expanded(
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
                     color: const Color(0xFFC6C3C3),
                     borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
+                    boxShadow: const [
                       BoxShadow(
                         color: Colors.black26,
                         blurRadius: 10,
@@ -1253,6 +1255,118 @@ class _DashboardPageState extends State<DashboardPage> {
                       ),
                     ],
                   ),
+                  child: favorites.isEmpty
+                      ? const Center(
+                          child: Text(
+                            "No favorites yet",
+                            style: TextStyle(fontSize: 16),
+                          ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(12),
+                          itemCount: favorites.length,
+                          itemBuilder: (context, index) {
+                            final item = favorites[index];
+                            final name = item['common_name'] ?? 'Unknown';
+
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(10),
+
+                              onTap: () async {
+                                final abundanceResponse = await Supabase
+                                    .instance
+                                    .client
+                                    .from('bird_abundance')
+                                    .select()
+                                    .eq('common_name', name)
+                                    .maybeSingle();
+
+                                final birdResponse = await Supabase
+                                    .instance
+                                    .client
+                                    .from('birds')
+                                    .select()
+                                    .eq('common_name', name)
+                                    .maybeSingle();
+
+                                if (!context.mounted) return;
+
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => BirdDetailsPage(
+                                      bird: {
+                                        ...?birdResponse,
+                                        'common_name': name,
+                                        'abundance_index':
+                                            abundanceResponse?['abundance_index'] ??
+                                            0,
+                                        'sightings':
+                                            abundanceResponse?['sightings'] ??
+                                            0,
+                                      },
+                                    ),
+                                  ),
+                                );
+                              },
+
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 14,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: index % 2 == 0
+                                      ? const Color(0xFFDADADA)
+                                      : const Color(0xFFE8E8E8),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.favorite,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: () async {
+                                        final user = Supabase
+                                            .instance
+                                            .client
+                                            .auth
+                                            .currentUser;
+                                        if (user == null) return;
+
+                                        final commonName = item['common_name'];
+
+                                        // 1. remove from Supabase
+                                        await Supabase.instance.client
+                                            .from('user_favorites')
+                                            .delete()
+                                            .eq('user_id', user.id)
+                                            .eq('common_name', commonName);
+
+                                        // 2. remove from UI instantly
+                                        setState(() {
+                                          favorites.removeAt(index);
+                                        });
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                 ),
               ),
             ],
@@ -1262,6 +1376,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  // ---------------- BOX WIDGET ----------------
   Widget buildBox(IconData? icon, {String? label, String? value}) {
     return AspectRatio(
       aspectRatio: 1,
@@ -1281,13 +1396,10 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // ICON (only if provided)
               if (icon != null) ...[
                 Icon(icon, size: 70, color: Colors.black87),
                 const SizedBox(height: 6),
               ],
-
-              // VALUE
               Text(
                 value ?? "",
                 style: TextStyle(
@@ -1295,8 +1407,6 @@ class _DashboardPageState extends State<DashboardPage> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-
-              // LABEL
               Text(
                 label ?? "",
                 style: TextStyle(fontSize: icon == null ? 30 : 20),
@@ -1469,7 +1579,93 @@ class TableRowSpecsItem extends StatelessWidget {
 
 // -------------------------- Search Page -------------------------- \\
 
-class SearchPage extends StatelessWidget {
+class SearchPage extends StatefulWidget {
+  const SearchPage({super.key});
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final TextEditingController _searchController = TextEditingController();
+
+  final user = Supabase.instance.client.auth.currentUser;
+
+  Set<String> favoriteBirds = {};
+
+  List<Map<String, dynamic>> birds = [];
+  bool isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    loadFavorites();
+  }
+
+  Future<void> loadFavorites() async {
+    if (user == null) return;
+
+    final response = await Supabase.instance.client
+        .from('user_favorites')
+        .select('common_name')
+        .eq('user_id', user!.id);
+
+    setState(() {
+      favoriteBirds = Set<String>.from(response.map((e) => e['common_name']));
+    });
+  }
+
+  Future<void> searchBirds(String query) async {
+    if (query.trim().isEmpty) {
+      setState(() {
+        birds = [];
+        isLoading = false;
+      });
+      return;
+    }
+
+    setState(() {
+      isLoading = true;
+    });
+
+    final response = await Supabase.instance.client
+        .from('birds')
+        .select()
+        .or('common_name.ilike.%$query%,scientific_name.ilike.%$query%');
+
+    setState(() {
+      birds = List<Map<String, dynamic>>.from(response);
+      isLoading = false;
+    });
+  }
+
+  Future<void> toggleFavorite(String name) async {
+    if (user == null) return;
+
+    final isFav = favoriteBirds.contains(name);
+
+    setState(() {
+      if (isFav) {
+        favoriteBirds.remove(name);
+      } else {
+        favoriteBirds.add(name);
+      }
+    });
+
+    if (!isFav) {
+      await Supabase.instance.client.from('user_favorites').insert({
+        'user_id': user!.id,
+        'common_name': name,
+      });
+    } else {
+      await Supabase.instance.client
+          .from('user_favorites')
+          .delete()
+          .eq('user_id', user!.id)
+          .eq('common_name', name);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1477,33 +1673,113 @@ class SearchPage extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            SizedBox(height: 30),
-            Text(
+            const SizedBox(height: 30),
+
+            const Text(
               "Search",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
-            SizedBox(height: 20),
-            SearchField(),
+
+            const SizedBox(height: 20),
+
+            TextField(
+              controller: _searchController,
+              onChanged: searchBirds,
+              decoration: InputDecoration(
+                hintText: "Search Bird",
+                filled: true,
+                fillColor: Colors.grey[300],
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                suffixIcon: const Icon(Icons.search),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            Expanded(
+              child: isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : birds.isEmpty
+                  ? const Center(
+                      child: Text("Search for a bird to learn more about it"),
+                    )
+                  : ListView.builder(
+                      itemCount: birds.length,
+                      itemBuilder: (context, index) {
+                        final bird = birds[index];
+                        final name = bird['common_name'];
+
+                        final isFavorite = favoriteBirds.contains(name);
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: ListTile(
+                            leading: const Icon(Icons.flutter_dash),
+
+                            title: Text(
+                              name ?? 'Unknown Bird',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+
+                            subtitle: Text(
+                              [bird['scientific_name'], bird['family']]
+                                  .where(
+                                    (e) => e != null && e.toString().isNotEmpty,
+                                  )
+                                  .join('\n'),
+                            ),
+
+                            isThreeLine: true,
+
+                            // ❤️ FAVORITE BUTTON
+                            trailing: IconButton(
+                              icon: Icon(
+                                isFavorite
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                color: isFavorite ? Colors.red : Colors.grey,
+                              ),
+                              onPressed: () => toggleFavorite(name),
+                            ),
+
+                            // 📌 DETAILS PAGE
+                            onTap: () async {
+                              final abundanceResponse = await Supabase
+                                  .instance
+                                  .client
+                                  .from('bird_abundance')
+                                  .select()
+                                  .eq('common_name', name)
+                                  .maybeSingle();
+
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => BirdDetailsPage(
+                                    bird: {
+                                      ...bird,
+                                      'abundance_index':
+                                          abundanceResponse?['abundance_index'] ??
+                                          0,
+                                      'sightings':
+                                          abundanceResponse?['sightings'] ?? 0,
+                                    },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
+            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class SearchField extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      decoration: InputDecoration(
-        hintText: "Search Bird",
-        filled: true,
-        fillColor: Colors.grey[300],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        suffixIcon: Icon(Icons.search),
       ),
     );
   }
