@@ -1241,9 +1241,18 @@ class _DashboardPageState extends State<DashboardPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  ElevatedButton(
+                  ElevatedButton.icon(
                     onPressed: logout,
-                    child: const Text("Log Out"),
+                    icon: const Icon(Icons.logout),
+                    label: const Text("Log Out"),
+                    style: ElevatedButton.styleFrom(
+                      foregroundColor: Colors.white, // icon + text color
+                      backgroundColor: const Color.fromARGB(255, 201, 170, 159),
+                      textStyle: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1252,7 +1261,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
               // STATS ROW
               SizedBox(
-                height: 140,
+                height: 200,
                 child: Row(
                   children: [
                     Expanded(
@@ -1268,7 +1277,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               : batteryPercent! > 20
                               ? Icons.battery_3_bar
                               : Icons.battery_alert,
-                          size: 50,
+                          size: 80,
                           color: Colors.black87,
                         ),
                         value: "${batteryPercent ?? 0}%",
@@ -1378,7 +1387,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                 margin: const EdgeInsets.only(bottom: 8),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 12,
-                                  vertical: 14,
+                                  vertical: 15,
                                 ),
                                 decoration: BoxDecoration(
                                   color: index.isEven
@@ -1395,6 +1404,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                         name,
                                         style: const TextStyle(
                                           fontWeight: FontWeight.bold,
+                                          fontSize: 20,
                                         ),
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -1410,10 +1420,45 @@ class _DashboardPageState extends State<DashboardPage> {
                                             .client
                                             .auth
                                             .currentUser;
-
                                         if (user == null) return;
 
                                         final commonName = item['common_name'];
+
+                                        final shouldDelete = await showDialog<bool>(
+                                          context: context,
+                                          builder: (context) {
+                                            return AlertDialog(
+                                              title: const Text(
+                                                "Remove Favorite",
+                                              ),
+                                              content: const Text(
+                                                "Are you sure you would like to remove this from your favorites?",
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.of(
+                                                    context,
+                                                  ).pop(false),
+                                                  child: const Text("Cancel"),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () => Navigator.of(
+                                                    context,
+                                                  ).pop(true),
+                                                  child: const Text(
+                                                    "Remove",
+                                                    style: TextStyle(
+                                                      color: Colors.red,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        );
+
+                                        // user tapped outside or canceled
+                                        if (shouldDelete != true) return;
 
                                         await Supabase.instance.client
                                             .from('user_favorites')
@@ -1472,7 +1517,7 @@ class _DashboardPageState extends State<DashboardPage> {
             if (customIcon != null)
               customIcon
             else if (icon != null)
-              Icon(icon, size: 40),
+              Icon(icon, size: 75),
 
             const SizedBox(height: 6),
 
@@ -1481,13 +1526,13 @@ class _DashboardPageState extends State<DashboardPage> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
             ),
 
             Text(
               label ?? "",
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
+              style: const TextStyle(fontSize: 20),
             ),
           ],
         ),
@@ -1510,6 +1555,14 @@ class DeviceSpecsPage extends StatelessWidget {
             Text(
               "Device Specs",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const Text(
+              "Detailed specifications of the field device hardware components",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.normal,
+                color: Colors.black,
+              ),
             ),
             Divider(),
             SizedBox(height: 20),
@@ -1759,6 +1812,15 @@ class _SearchPageState extends State<SearchPage> {
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
 
+            const Text(
+              "Search for birds by common or scientific name",
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.normal,
+                color: Colors.black,
+              ),
+            ),
+
             Divider(),
             const SizedBox(height: 20),
 
@@ -1906,14 +1968,28 @@ class SightingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SizedBox(height: 50),
-        Center(
-          child: Text(
-            "Sightings",
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        const SizedBox(height: 50),
+        const Center(
+          child: Column(
+            children: [
+              Text(
+                "Sightings",
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 6),
+              Text(
+                "Your recent bird sightings will appear here",
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.normal,
+                  color: Colors.black, // 👈 this is what makes it match
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
-        Divider(),
+        const Divider(),
         Expanded(child: FavoritesTable()),
       ],
     );
@@ -2189,9 +2265,25 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
 
-                const Text(
-                  "Please save your settings after making changes. These settings will be used to configure the HUD display in your telescope eyepiece.",
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.normal),
+                const Text.rich(
+                  TextSpan(
+                    text: "Please ",
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.normal,
+                      color: Colors.black,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: "scroll down",
+                        style: TextStyle(decoration: TextDecoration.underline),
+                      ),
+                      TextSpan(
+                        text:
+                            " to save your settings after making changes. These settings will be used to configure the HUD display in your telescope eyepiece.",
+                      ),
+                    ],
+                  ),
                 ),
 
                 Divider(),
