@@ -1983,10 +1983,14 @@ class HudPage extends StatefulWidget {
 class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
   List<String?> selectedFields = List.filled(4, null);
   Color selectedColor = Colors.green;
+  String? saveMessage;
 
   Map<String, dynamic> buildHudJson() {
     return {
-      "hud_fields": selectedFields.map((e) => e ?? "").toList(),
+      "hud_fields": selectedFields.map((e) {
+        if (e == null || e == "None") return null;
+        return e;
+      }).toList(),
       "hud_color":
           "#${selectedColor.value.toRadixString(16).substring(2).toUpperCase()}",
     };
@@ -2001,33 +2005,91 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
     loadSettings();
   }
 
+  final supabase = Supabase.instance.client;
+
   Future<void> saveSettings() async {
+    final supabase = Supabase.instance.client;
     final prefs = await SharedPreferences.getInstance();
 
-    final jsonString = jsonEncode(buildHudJson());
+    final jsonData = buildHudJson();
+    final userId = supabase.auth.currentUser!.id;
 
-    await prefs.setString("hud_settings", jsonString);
+    // 1. SAVE TO SUPABASE (this is where your upsert goes)
+    await supabase.from('user_hud_settings').upsert({
+      'user_id': userId,
+      'settings': jsonData,
+      'updated_at': DateTime.now().toIso8601String(),
+    }, onConflict: 'user_id');
 
-    print(jsonString);
-  }
-
-  Future<void> loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString("hud_settings");
-
-    if (jsonString == null) return;
-
-    final json = jsonDecode(jsonString);
+    // 2. SAVE LOCAL CACHE
+    await prefs.setString("hud_settings", jsonEncode(jsonData));
 
     if (!mounted) return;
 
     setState(() {
+      saveMessage = "Settings saved successfully";
+    });
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      setState(() {
+        saveMessage = null;
+      });
+    });
+
+    print("Saved HUD settings: $jsonData");
+  }
+
+  Future<void> loadSettings() async {
+    final supabase = Supabase.instance.client;
+    final prefs = await SharedPreferences.getInstance();
+
+    final userId = supabase.auth.currentUser?.id;
+
+    Map<String, dynamic>? json;
+
+    // 1. ALWAYS try Supabase first
+    if (userId != null) {
+      final data = await supabase
+          .from('user_hud_settings')
+          .select('settings')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      if (data != null && data['settings'] != null) {
+        json = data['settings'];
+
+        // 🔥 overwrite local cache with fresh cloud data
+        await prefs.setString("hud_settings", jsonEncode(json));
+      }
+    }
+
+    // 2. ONLY fallback if Supabase returned nothing
+    if (json == null) {
+      final local = prefs.getString("hud_settings");
+      if (local != null) {
+        json = jsonDecode(local);
+      }
+    }
+
+    if (json == null || !mounted) return;
+
+    setState(() {
       selectedFields = List<String?>.from(
-        (json["hud_fields"] as List).map((e) => e == "" ? null : e),
+        (json!["hud_fields"] as List).map((e) {
+          final v = e as String?;
+
+          if (v == null || v == "None" || v.isEmpty) {
+            return null;
+          }
+
+          return v;
+        }),
       );
 
       selectedColor = Color(
-        int.parse(json["hud_color"].substring(1), radix: 16) + 0xFF000000,
+        int.parse(json["hud_color"].replaceFirst('#', ''), radix: 16) |
+            0xFF000000,
       );
     });
   }
@@ -2154,9 +2216,22 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
                 ),
 
                 const SizedBox(height: 40),
+                if (saveMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Text(
+                      saveMessage!,
+                      style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+
                 Center(
                   child: ElevatedButton(
                     onPressed: saveSettings,
+
                     child: const Text("Save Settings"),
                   ),
                 ),
@@ -2250,21 +2325,24 @@ class CustomDropdownField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: EdgeInsets.all(20),
-      padding: EdgeInsets.symmetric(horizontal: 12),
+      width: 600,
+      margin: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: Colors.grey[300],
         borderRadius: BorderRadius.circular(12),
       ),
-
       child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          hint: Text("Option"),
-          isExpanded: true,
-          items: options.map((option) {
-            return DropdownMenuItem(value: option, child: Text(option));
-          }).toList(),
+        child: DropdownButton<String?>(
+          value: CustomDropdownField.options.contains(value) ? value : null,
+
+          items: [
+            const DropdownMenuItem<String?>(value: null, child: Text("None")),
+            ...CustomDropdownField.options.map((opt) {
+              return DropdownMenuItem<String?>(value: opt, child: Text(opt));
+            }),
+          ],
+
           onChanged: onChanged,
         ),
       ),
