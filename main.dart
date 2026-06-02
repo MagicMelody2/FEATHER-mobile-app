@@ -2137,6 +2137,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
   List<String?> selectedFields = List.filled(4, null);
   Color selectedColor = Colors.green;
   String? saveMessage;
+  String selectedLayout = "layout1";
 
   Map<String, dynamic> buildHudJson() {
     return {
@@ -2146,6 +2147,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
       }).toList(),
       "hud_color":
           "#${selectedColor.value.toRadixString(16).substring(2).toUpperCase()}",
+      "hud_layout": selectedLayout,
     };
   }
 
@@ -2363,6 +2365,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
                         null,
                         label: "Layout #1",
                         imagePath: "assets/images/layout1.png",
+                        layoutId: "layout1",
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2371,6 +2374,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
                         null,
                         label: "Layout #2",
                         imagePath: "assets/images/layout2.png",
+                        layoutId: "layout2",
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -2379,6 +2383,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
                         null,
                         label: "Layout #3",
                         imagePath: "assets/images/layout3.png",
+                        layoutId: "layout3",
                       ),
                     ),
                   ],
@@ -2418,55 +2423,39 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
     String? label,
     String? value,
     String? imagePath,
+    String? layoutId,
   }) {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFFC6C3C3),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // =========================
-              // IMAGE OR ICON
-              // =========================
-              if (imagePath != null) ...[
-                Image.asset(
-                  imagePath,
-                  height: 60,
-                  width: 60,
-                  fit: BoxFit.contain,
-                ),
-                const SizedBox(height: 6),
-              ] else if (icon != null) ...[
-                Icon(icon, size: 60, color: Colors.black87),
-                const SizedBox(height: 6),
+    final isSelected = selectedLayout == layoutId;
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          selectedLayout = layoutId!;
+        });
+      },
+      child: AspectRatio(
+        aspectRatio: 1,
+        child: Container(
+          decoration: BoxDecoration(
+            color: isSelected ? Color(0xFFC2C0C0) : const Color(0xFFC6C3C3),
+            borderRadius: BorderRadius.circular(16),
+            border: isSelected
+                ? Border.all(
+                    color: const Color.fromARGB(205, 55, 32, 23),
+                    width: 3,
+                  )
+                : null,
+          ),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (imagePath != null)
+                  Image.asset(imagePath, height: 60, width: 60),
+
+                if (label != null) Text(label),
               ],
-
-              // =========================
-              // VALUE TEXT
-              // =========================
-              if (value != null && value.isNotEmpty)
-                Text(
-                  value,
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-
-              // =========================
-              // LABEL TEXT
-              // =========================
-              if (label != null) Text(label, style: TextStyle(fontSize: 16)),
-            ],
+            ),
           ),
         ),
       ),
