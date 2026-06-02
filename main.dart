@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'bird_details_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -1433,6 +1434,7 @@ class DeviceSpecsPage extends StatelessWidget {
               "Device Specs",
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
+            Divider(),
             SizedBox(height: 20),
             Expanded(child: SpecsTable()),
           ],
@@ -1680,6 +1682,7 @@ class _SearchPageState extends State<SearchPage> {
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
 
+            Divider(),
             const SizedBox(height: 20),
 
             TextField(
@@ -1726,12 +1729,46 @@ class _SearchPageState extends State<SearchPage> {
                               ),
                             ),
 
-                            subtitle: Text(
-                              [bird['scientific_name'], bird['family']]
-                                  .where(
-                                    (e) => e != null && e.toString().isNotEmpty,
-                                  )
-                                  .join('\n'),
+                            subtitle: Text.rich(
+                              TextSpan(
+                                children: [
+                                  // Scientific name
+                                  if (bird['scientific_name'] != null &&
+                                      bird['scientific_name']
+                                          .toString()
+                                          .isNotEmpty)
+                                    TextSpan(
+                                      text: '${bird['scientific_name']}\n',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontStyle: FontStyle.italic,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+
+                                  // Order
+                                  if (bird['order_name'] != null &&
+                                      bird['order_name'].toString().isNotEmpty)
+                                    TextSpan(
+                                      text: 'ORDER: ${bird['order_name']}\n',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.normal,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+
+                                  // Family
+                                  if (bird['family'] != null &&
+                                      bird['family'].toString().isNotEmpty)
+                                    TextSpan(
+                                      text: 'FAMILY: ${bird['family']}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.normal,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
 
                             isThreeLine: true,
@@ -1792,11 +1829,14 @@ class SightingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SizedBox(height: 20),
-        Text(
-          "Sightings",
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        SizedBox(height: 50),
+        Center(
+          child: Text(
+            "Sightings",
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
         ),
+        Divider(),
         Expanded(child: FavoritesTable()),
       ],
     );
@@ -1935,117 +1975,278 @@ class TableRowItem extends StatelessWidget {
 
 // -------------------------- Hud Page -------------------------- \\
 
-class HudPage extends StatelessWidget {
+class HudPage extends StatefulWidget {
+  @override
+  _HudPageState createState() => _HudPageState();
+}
+
+class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
+  List<String?> selectedFields = List.filled(4, null);
+  Color selectedColor = Colors.green;
+
+  Map<String, dynamic> buildHudJson() {
+    return {
+      "hud_fields": selectedFields.map((e) => e ?? "").toList(),
+      "hud_color":
+          "#${selectedColor.value.toRadixString(16).substring(2).toUpperCase()}",
+    };
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadSettings();
+  }
+
+  Future<void> saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final jsonString = jsonEncode(buildHudJson());
+
+    await prefs.setString("hud_settings", jsonString);
+
+    print(jsonString);
+  }
+
+  Future<void> loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString("hud_settings");
+
+    if (jsonString == null) return;
+
+    final json = jsonDecode(jsonString);
+
+    if (!mounted) return;
+
+    setState(() {
+      selectedFields = List<String?>.from(
+        (json["hud_fields"] as List).map((e) => e == "" ? null : e),
+      );
+
+      selectedColor = Color(
+        int.parse(json["hud_color"].substring(1), radix: 16) + 0xFF000000,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context); // 👈 REQUIRED
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(10),
-        child: ListView(
-          children: [
-            Text(
-              "HUD Settings",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
 
-            SizedBox(height: 15),
-
-            CustomDropdownField(),
-            SizedBox(height: 8),
-            CustomDropdownField(),
-            SizedBox(height: 8),
-            CustomDropdownField(),
-            SizedBox(height: 8),
-            CustomDropdownField(),
-
-            SizedBox(height: 20),
-
-            Text(
-              "HUD Color",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-
-            SizedBox(height: 15),
-
-            HexColorPickerField(),
-
-            SizedBox(height: 20),
-
-            Text(
-              "Data Callout",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-
-            SizedBox(height: 15),
-
-            // Battery HUD tile (fixed version of your Positioned box)
-            Container(
-              width: 170,
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(0xFFC6C3C3),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.battery_full,
-                  size: 90,
-                  color: Colors.black87,
+                // HEADER
+                const Text(
+                  "HUD Settings",
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
-              ),
-            ),
 
-            SizedBox(height: 20),
-
-            Container(
-              width: 170,
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(0xFFC6C3C3),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 10,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Icon(
-                  Icons.battery_full,
-                  size: 90,
-                  color: Colors.black87,
+                const Text(
+                  "Please save your settings after making changes. These settings will be used to configure the HUD display in your telescope eyepiece.",
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.normal),
                 ),
-              ),
+
+                Divider(),
+                const SizedBox(height: 20),
+
+                // MAIN ROW (still side-by-side)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // LEFT
+                    Expanded(
+                      child: Column(
+                        children: [
+                          const Text(
+                            "Label Fields",
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          for (int i = 0; i < 4; i++)
+                            CustomDropdownField(
+                              value: selectedFields[i],
+                              onChanged: (value) {
+                                setState(() {
+                                  selectedFields[i] = value;
+                                });
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(width: 10),
+
+                    // RIGHT
+                    Expanded(
+                      child: Column(
+                        children: [
+                          const Text(
+                            "Color Picker",
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+
+                          HexColorPickerField(
+                            color: selectedColor,
+                            onChanged: (color) {
+                              setState(() {
+                                selectedColor = color;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 30),
+                const Text(
+                  "Layout Options",
+                  style: TextStyle(fontSize: 22, fontStyle: FontStyle.italic),
+                ),
+                const SizedBox(height: 30),
+
+                // FOOTER CARDS (now scrollable naturally)
+                Row(
+                  children: [
+                    Expanded(
+                      child: buildBox(
+                        null,
+                        label: "Layout #1",
+                        imagePath: "assets/images/layout1.png",
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: buildBox(
+                        null,
+                        label: "Layout #2",
+                        imagePath: "assets/images/layout2.png",
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: buildBox(
+                        null,
+                        label: "Layout #3",
+                        imagePath: "assets/images/layout3.png",
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 40),
+                Center(
+                  child: ElevatedButton(
+                    onPressed: saveSettings,
+                    child: const Text("Save Settings"),
+                  ),
+                ),
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildBox(
+    IconData? icon, {
+    String? label,
+    String? value,
+    String? imagePath,
+  }) {
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFC6C3C3),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // =========================
+              // IMAGE OR ICON
+              // =========================
+              if (imagePath != null) ...[
+                Image.asset(
+                  imagePath,
+                  height: 60,
+                  width: 60,
+                  fit: BoxFit.contain,
+                ),
+                const SizedBox(height: 6),
+              ] else if (icon != null) ...[
+                Icon(icon, size: 60, color: Colors.black87),
+                const SizedBox(height: 6),
+              ],
+
+              // =========================
+              // VALUE TEXT
+              // =========================
+              if (value != null && value.isNotEmpty)
+                Text(
+                  value,
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+
+              // =========================
+              // LABEL TEXT
+              // =========================
+              if (label != null) Text(label, style: TextStyle(fontSize: 16)),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class CustomDropdownField extends StatefulWidget {
-  @override
-  _CustomDropdownFieldState createState() => _CustomDropdownFieldState();
-}
+class CustomDropdownField extends StatelessWidget {
+  final String? value;
+  final Function(String?) onChanged;
 
-class _CustomDropdownFieldState extends State<CustomDropdownField> {
-  String? selectedValue;
-  final List<String> options = [
+  const CustomDropdownField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  static const options = [
     "Common Name",
     "Scientific Name",
     "Confidence Rate",
     "Conservation Status",
   ];
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -2055,80 +2256,78 @@ class _CustomDropdownFieldState extends State<CustomDropdownField> {
         color: Colors.grey[300],
         borderRadius: BorderRadius.circular(12),
       ),
+
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
+          value: value,
           hint: Text("Option"),
-          value: selectedValue,
           isExpanded: true,
-          icon: Icon(Icons.arrow_drop_down_circle_outlined),
-          items: options.map((String value) {
-            return DropdownMenuItem<String>(value: value, child: Text(value));
+          items: options.map((option) {
+            return DropdownMenuItem(value: option, child: Text(option));
           }).toList(),
-          onChanged: (newValue) {
-            setState(() {
-              selectedValue = newValue;
-            });
-          },
+          onChanged: onChanged,
         ),
       ),
     );
   }
 }
 
-class HexColorPickerField extends StatefulWidget {
-  @override
-  _HexColorPickerFieldState createState() => _HexColorPickerFieldState();
-}
+class HexColorPickerField extends StatelessWidget {
+  final Color color;
+  final Function(Color) onChanged;
 
-class _HexColorPickerFieldState extends State<HexColorPickerField> {
-  Color selectedColor = Colors.blue;
+  const HexColorPickerField({
+    super.key,
+    required this.color,
+    required this.onChanged,
+  });
 
-  void _openColorPicker() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text("Pick a Color"),
-          content: SingleChildScrollView(
-            child: ColorPicker(
-              pickerColor: selectedColor,
-              onColorChanged: (color) {
-                setState(() {
-                  selectedColor = color;
-                });
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              child: Text("Done"),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  String get hexValue =>
-      '#${selectedColor.value.toRadixString(16).substring(2).toUpperCase()}';
+  String getHex(Color color) =>
+      '#${color.value.toRadixString(16).substring(2).toUpperCase()}';
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: _openColorPicker,
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: selectedColor,
-          borderRadius: BorderRadius.circular(12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 20)),
+
+        GestureDetector(
+          onTap: () {
+            showDialog(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: Text("Pick a Color"),
+                content: ColorPicker(
+                  pickerColor: color,
+                  onColorChanged: onChanged,
+                ),
+              ),
+            );
+          },
+          child: Container(
+            height: 315,
+            margin: EdgeInsets.all(20),
+            padding: EdgeInsets.symmetric(horizontal: 12),
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(12),
+            ),
+
+            child: Center(
+              child: Text(
+                getHex(color),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
         ),
-        child: Text(
-          hexValue,
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-      ),
+      ],
     );
   }
 }
