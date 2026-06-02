@@ -1023,6 +1023,7 @@ class _DashboardPageState extends State<DashboardPage> {
   String? username;
 
   int totalSightings = 0;
+  int? batteryPercent;
   String? mostCommonBird;
   String? rarestBird;
 
@@ -1032,12 +1033,14 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     initDashboard();
+    listenToBattery();
   }
 
   Future<void> initDashboard() async {
     await loadUser();
     await loadBirdStats();
     await loadFavorites();
+    await loadDeviceStatus();
   }
 
   // ---------------- USER ----------------
@@ -1064,6 +1067,52 @@ class _DashboardPageState extends State<DashboardPage> {
 
       username = (clean == null || clean.isEmpty) ? 'User' : clean;
     });
+  }
+
+  // ---------------- BATTERY ----------------
+  Future<void> loadDeviceStatus() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    // Get the device serial for this user
+    final device = await Supabase.instance.client
+        .from('device_codes')
+        .select('device_serial')
+        .eq('user_id', user.id)
+        .eq('used', true)
+        .maybeSingle();
+
+    final serial = device?['device_serial'];
+    if (serial == null) return;
+
+    // Get battery
+    final status = await Supabase.instance.client
+        .from('device_status')
+        .select('battery_percent')
+        .eq('device_serial', serial)
+        .maybeSingle();
+
+    if (!mounted) return;
+
+    setState(() {
+      batteryPercent = status?['battery_percent'];
+    });
+
+    print("SERIAL: $serial");
+    print("DEVICE STATUS RAW: $status");
+  }
+
+  void listenToBattery() {
+    Supabase.instance.client
+        .from('device_status')
+        .stream(primaryKey: ['device_serial'])
+        .listen((data) {
+          if (data.isEmpty) return;
+
+          setState(() {
+            batteryPercent = data.first['battery_percent'];
+          });
+        });
   }
 
   // ---------------- STATS ----------------
@@ -1199,40 +1248,54 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
 
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
 
               // STATS ROW
-              Row(
-                children: [
-                  Expanded(child: buildBox(Icons.battery_full)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: buildBox(
-                      Icons.visibility_outlined,
-                      value: totalSightings.toString(),
-                      label: "Total Sightings",
+              SizedBox(
+                height: 140,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: buildBox(
+                        null,
+                        customIcon: Icon(
+                          batteryPercent == null
+                              ? Icons.battery_unknown
+                              : batteryPercent! > 80
+                              ? Icons.battery_full
+                              : batteryPercent! > 50
+                              ? Icons.battery_6_bar
+                              : batteryPercent! > 20
+                              ? Icons.battery_3_bar
+                              : Icons.battery_alert,
+                          size: 50,
+                          color: Colors.black87,
+                        ),
+                        value: "${batteryPercent ?? 0}%",
+                        label: "Field Device Battery",
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: buildBox(
-                      Icons.bar_chart,
-                      value: mostCommonBird ?? "...",
-                      label: "Common Sightings",
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: buildBox(
+                        Icons.bar_chart,
+                        value: mostCommonBird ?? "...",
+                        label: "Common Sightings",
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: buildBox(
-                      Icons.emoji_events,
-                      value: rarestBird ?? "...",
-                      label: "Rarest Sightings",
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: buildBox(
+                        Icons.emoji_events,
+                        value: rarestBird ?? "...",
+                        label: "Rarest Sightings",
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
 
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
 
               const Text(
                 "Favorites",
@@ -1241,7 +1304,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
               const SizedBox(height: 10),
 
-              // FAVORITES BOX
+              // FAVORITES TABLE
               Expanded(
                 child: Container(
                   width: double.infinity,
@@ -1318,20 +1381,22 @@ class _DashboardPageState extends State<DashboardPage> {
                                   vertical: 14,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: index % 2 == 0
+                                  color: index.isEven
                                       ? const Color(0xFFDADADA)
                                       : const Color(0xFFE8E8E8),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-
                                 child: Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
+                                    Expanded(
+                                      child: Text(
+                                        name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     IconButton(
@@ -1345,20 +1410,23 @@ class _DashboardPageState extends State<DashboardPage> {
                                             .client
                                             .auth
                                             .currentUser;
+
                                         if (user == null) return;
 
                                         final commonName = item['common_name'];
 
-                                        // 1. remove from Supabase
                                         await Supabase.instance.client
                                             .from('user_favorites')
                                             .delete()
                                             .eq('user_id', user.id)
                                             .eq('common_name', commonName);
 
-                                        // 2. remove from UI instantly
                                         setState(() {
-                                          favorites.removeAt(index);
+                                          favorites.removeWhere(
+                                            (fav) =>
+                                                fav['common_name'] ==
+                                                commonName,
+                                          );
                                         });
                                       },
                                     ),
@@ -1378,47 +1446,56 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // ---------------- BOX WIDGET ----------------
-  Widget buildBox(IconData? icon, {String? label, String? value}) {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFFC6C3C3),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+  Widget buildBox(
+    IconData? icon, {
+    Widget? customIcon,
+    String? label,
+    String? value,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFC6C3C3),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (customIcon != null)
+              customIcon
+            else if (icon != null)
+              Icon(icon, size: 40),
+
+            const SizedBox(height: 6),
+
+            Text(
+              value ?? "",
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+
+            Text(
+              label ?? "",
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
             ),
           ],
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 70, color: Colors.black87),
-                const SizedBox(height: 6),
-              ],
-              Text(
-                value ?? "",
-                style: TextStyle(
-                  fontSize: icon == null ? 30 : 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                label ?? "",
-                style: TextStyle(fontSize: icon == null ? 30 : 20),
-              ),
-            ],
-          ),
         ),
       ),
     );
   }
 }
+
 // -------------------------- Device Specs Page -------------------------- \\
 
 class DeviceSpecsPage extends StatelessWidget {
@@ -2101,7 +2178,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(20),
             child: Column(
               children: [
                 const SizedBox(height: 10),
