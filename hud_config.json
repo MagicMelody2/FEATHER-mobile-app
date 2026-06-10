@@ -1,0 +1,10 @@
+{
+  "hud_color": "#D75C2B",
+  "hud_fields": [
+    "Common Name",
+    "Scientific Name",
+    "Confidence",
+    "Confidence"
+  ],
+  "hud_layout": "layout3"
+}
