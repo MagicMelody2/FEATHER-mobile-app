@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class BirdDetailsPage extends StatelessWidget {
   final Map<String, dynamic> bird;
@@ -7,6 +8,10 @@ class BirdDetailsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final String? url = bird['all_about_birds_url'];
+    print(bird);
+    print(url);
+
     return Scaffold(
       appBar: AppBar(title: Text(bird['common_name'] ?? 'Bird Details')),
       body: SingleChildScrollView(
@@ -23,7 +28,7 @@ class BirdDetailsPage extends StatelessWidget {
 
             Text(
               bird['scientific_name'] ?? '',
-              style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 16),
+              style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
             ),
 
             const SizedBox(height: 16),
@@ -42,6 +47,41 @@ class BirdDetailsPage extends StatelessWidget {
             _section("Tail Shape", bird['tail_shape']),
             _section("Call Pattern", bird['call_pattern']),
             _section("Call Type", bird['call_type']),
+
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 16),
+
+            if (url != null && url.isNotEmpty)
+              Center(
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    final uri = Uri.parse(url);
+
+                    print("Launching: $uri");
+
+                    final success = await launchUrl(
+                      uri,
+                      mode: LaunchMode.externalApplication,
+                    );
+
+                    print("Success: $success");
+                  },
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text("View Full Species Profile"),
+                ),
+              ),
+
+            const SizedBox(height: 16),
+
+            const Text(
+              "Information adapted from the Cornell Lab of Ornithology's All About Birds.",
+              style: TextStyle(
+                fontSize: 13,
+                fontStyle: FontStyle.italic,
+                color: Colors.grey,
+              ),
+            ),
           ],
         ),
       ),
@@ -49,7 +89,7 @@ class BirdDetailsPage extends StatelessWidget {
   }
 
   Widget _section(String title, dynamic value) {
-    if (value == null || value.toString().isEmpty) {
+    if (value == null || value.toString().trim().isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -63,7 +103,7 @@ class BirdDetailsPage extends StatelessWidget {
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          Text(value.toString()),
+          Text(value.toString(), style: const TextStyle(fontSize: 15)),
         ],
       ),
     );

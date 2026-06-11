@@ -2139,6 +2139,8 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
   String? saveMessage;
   String selectedLayout = "layout1";
 
+  bool canViewConservationStatus = false;
+
   Map<String, dynamic> buildHudJson() {
     return {
       "hud_fields": selectedFields.map((e) {
@@ -2205,6 +2207,18 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
 
     // 1. ALWAYS try Supabase first
     if (userId != null) {
+      // Load institutional status
+      final profile = await supabase
+          .from('profiles')
+          .select('is_institutional')
+          .eq('id', userId)
+          .maybeSingle();
+
+      canViewConservationStatus = profile?['is_institutional'] == true;
+
+      print("Institutional: $canViewConservationStatus");
+
+      // Load HUD settings
       final data = await supabase
           .from('user_hud_settings')
           .select('settings')
@@ -2214,7 +2228,6 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
       if (data != null && data['settings'] != null) {
         json = data['settings'];
 
-        // 🔥 overwrite local cache with fresh cloud data
         await prefs.setString("hud_settings", jsonEncode(json));
       }
     }
@@ -2235,6 +2248,10 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
           final v = e as String?;
 
           if (v == null || v == "None" || v.isEmpty) {
+            return null;
+          }
+
+          if (!canViewConservationStatus && v == "Conservation Status") {
             return null;
           }
 
@@ -2311,6 +2328,8 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
                           for (int i = 0; i < 4; i++)
                             CustomDropdownField(
                               value: selectedFields[i],
+                              canViewConservationStatus:
+                                  canViewConservationStatus,
                               onChanged: (value) {
                                 setState(() {
                                   selectedFields[i] = value;
@@ -2424,6 +2443,7 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
     String? value,
     String? imagePath,
     String? layoutId,
+    q,
   }) {
     final isSelected = selectedLayout == layoutId;
 
@@ -2466,22 +2486,29 @@ class _HudPageState extends State<HudPage> with AutomaticKeepAliveClientMixin {
 class CustomDropdownField extends StatelessWidget {
   final String? value;
   final Function(String?) onChanged;
+  final bool canViewConservationStatus;
 
   const CustomDropdownField({
     super.key,
     required this.value,
     required this.onChanged,
+    required this.canViewConservationStatus,
   });
 
-  static const options = [
-    "Common Name",
-    "Scientific Name",
-    "Confidence Rate",
-    "Conservation Status",
-  ];
+  List<String> get options {
+    final base = ["Common Name", "Scientific Name", "Confidence Rate"];
+
+    if (canViewConservationStatus) {
+      base.add("Conservation Status");
+    }
+
+    return base;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final items = options;
+
     return Container(
       width: 600,
       margin: const EdgeInsets.all(20),
@@ -2492,16 +2519,14 @@ class CustomDropdownField extends StatelessWidget {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String?>(
-          value: CustomDropdownField.options.contains(value) ? value : null,
-
+          value: items.contains(value) ? value : null,
+          onChanged: onChanged,
           items: [
             const DropdownMenuItem<String?>(value: null, child: Text("None")),
-            ...CustomDropdownField.options.map((opt) {
-              return DropdownMenuItem<String?>(value: opt, child: Text(opt));
-            }),
+            ...items.map(
+              (opt) => DropdownMenuItem<String?>(value: opt, child: Text(opt)),
+            ),
           ],
-
-          onChanged: onChanged,
         ),
       ),
     );
@@ -2523,47 +2548,36 @@ class HexColorPickerField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 20)),
-
-        GestureDetector(
-          onTap: () {
-            showDialog(
-              context: context,
-              builder: (_) => AlertDialog(
-                title: Text("Pick a Color"),
-                content: ColorPicker(
-                  pickerColor: color,
-                  onColorChanged: onChanged,
-                ),
-              ),
-            );
-          },
-          child: Container(
-            height: 315,
-            margin: EdgeInsets.all(20),
-            padding: EdgeInsets.symmetric(horizontal: 12),
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(12),
-            ),
-
-            child: Center(
-              child: Text(
-                getHex(color),
-                style: TextStyle(
-                  color: Colors.white,
-                  fontStyle: FontStyle.italic,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+    return GestureDetector(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text("Pick a Color"),
+            content: ColorPicker(pickerColor: color, onColorChanged: onChanged),
+          ),
+        );
+      },
+      child: Container(
+        height: 315,
+        width: double.infinity,
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(
+            getHex(color),
+            style: const TextStyle(
+              color: Colors.white,
+              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
-      ],
+      ),
     );
   }
 }
