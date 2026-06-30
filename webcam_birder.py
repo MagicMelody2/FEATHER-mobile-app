@@ -1,4 +1,7 @@
-#(.venv) C:\Users\grace\OneDrive\Desktop\florida-bird-classifier-mainC:\Users\grace\.venv\Scripts\python.exe webcam_birder.py
+# cd "OneDrive\Desktop\florida-bird-classifier-main"
+# .venv\Scripts\activate
+# python webcam_birder.py
+# (.venv) C:\Users\grace\OneDrive\Desktop\florida-bird-classifier-mainC:\Users\grace\.venv\Scripts\python.exe webcam_birder.py
 
 DEVICE_ID = "FEATHER-000"
 
@@ -20,6 +23,8 @@ UDP_IP = "127.0.0.1"
 UDP_PORT = 4242
 
 import time
+import threading
+import random
 
 from collections import deque
 history = deque(maxlen=10)
@@ -126,8 +131,6 @@ last_bird = "Searching..."
 last_confidence = 0.0
 info = {}
 
-last_hud_version = -1
-
 user_id = get_user_from_device(DEVICE_ID)
 
 if user_id is None:
@@ -136,8 +139,6 @@ if user_id is None:
 
 
 hud = get_hud_settings(user_id)
-last_hud_version = hud["hud_version"]
-hud_settings = hud["settings"]
 
 if hud is None:
     hud = {
@@ -149,6 +150,61 @@ if hud is None:
         "hud_version": 0
     }
 print("HUD LOADED:", hud)
+
+last_hud_version = hud["hud_version"]
+hud_settings = hud["settings"]
+
+
+# -----------------------
+# Update hud settings
+# -----------------------
+
+hud_state = None
+last_hud_version = -1
+
+def hud_sync_loop():
+    global hud_state, last_hud_version
+    
+    while True:
+        try:
+            hud_check = get_hud_settings(user_id)
+            print("HUD CHECK RAW:", hud_check)
+
+            if not hud_check:
+                time.sleep(2)
+                continue
+            
+            version = int(hud_check.get("hud_version", -1))
+            print("HUD VERSION:", hud_check.get("hud_version"))
+            print("LAST VERSION:", last_hud_version)
+
+            if version == last_hud_version:
+                time.sleep(2)
+                continue
+
+            last_hud_version = version
+            hud_state = hud_check
+
+            hud_payload = {
+                "type": "hud",
+                "hud_color": hud_state["settings"]["hud_color"],
+                "hud_fields": hud_state["settings"]["hud_fields"],
+                "hud_layout": hud_state["settings"]["hud_layout"]
+            }
+
+            sock.sendto(
+                json.dumps(hud_payload).encode("utf-8"),
+                (UDP_IP, UDP_PORT)
+            )
+                
+            print("SENDING HUD PAYLOAD UDP:", hud_payload)
+
+        except Exception as e:
+            print("HUD SYNC ERROR:", e)
+
+        time.sleep(2)
+
+threading.Thread(target=hud_sync_loop, daemon=True).start()
 
 while True:
     ret, frame = cap.read()
@@ -206,21 +262,42 @@ while True:
         if "settings" not in hud:
             print("HUD ERROR: missing settings block")
             continue
+
+        h_frame, w_frame = frame.shape[:2]
+
+        # -----------------------------
+        # Coordinates and Size
+        # -----------------------------
+        h_frame, w_frame = frame.shape[:2]
+
+        padding = 40
+
+        min_h = 50
+        min_w = 280  # optional but recommended so labels fit horizontally
+
+        max_w = min(280, w_frame - padding * 2)
+        max_h = min(300, h_frame - padding * 2)
+
+        w = random.randint(min_w, max_w)
+        h = random.randint(min_h, max_h)
+
+        max_x = w_frame - w - padding
+        max_y = h_frame - h - padding
+
+        x = random.randint(padding, max(0, max_x))
+        y = random.randint(padding, max(0, max_y))
+                
         
         payload = {
             "type": "detection",
-            "x": 200,
-            "y": 150,
-            "w": 220,
-            "h": 220,
-            "common_name": info["common_name"],
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+            "common_name": info["common_name"].replace("_", " ").title(),
             "scientific_name": info["scientific_name"],
             "conservation_status": info["conservation_status"],
             "confidence": stable_conf,
-
-            "hud_color": hud["settings"]["hud_color"],
-            "hud_layout": hud["settings"]["hud_layout"],
-            "hud_fields": hud["settings"]["hud_fields"]
         }
 
         sock.sendto(
@@ -228,26 +305,12 @@ while True:
             (UDP_IP, UDP_PORT)
         )
 
-        print("SENDING UDP:", payload)
-
-        # -----------------------
-        # CHECK IF HUD UPDATED
-        # -----------------------
-        hud_check = get_hud_settings(user_id)
-
-        if hud_check["hud_version"] != last_hud_version:
-            print("HUD UPDATED")
-
-            last_hud_version = hud_check["hud_version"]
-
-            hud = hud_check
-
-        last_hud_version = hud_check["hud_version"]
-        hud_settings = hud_check["settings"]
+        print("SENDING PAYLOAD UDP:", payload)
 
     # -----------------------
     # LOCAL DISPLAY
     # -----------------------
+
 
     cv2.putText(display,
         f"{info.get('common_name', last_bird)}",
@@ -289,6 +352,8 @@ while True:
 
     if cv2.waitKey(1) == ord("q"):
         break
+
+
 
 cap.release()
 cv2.destroyAllWindows()
